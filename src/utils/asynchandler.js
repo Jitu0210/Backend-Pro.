@@ -5,5 +5,4 @@ const asynchandler = (requestHandler) => { // higher order functiom means functi
     }
 }
 
-
 export default asynchandler

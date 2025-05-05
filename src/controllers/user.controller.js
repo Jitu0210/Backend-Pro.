@@ -3,8 +3,10 @@ import ApiError from './../utils/ApiError.js';
 import user from "../models/user.model.js"
 import uploadfileCloudinary from "../utils/cloudinary.js"
 import ApiResponse from "../utils/Apiresponse.js"
+import User from '../models/user.model.js';
+import jwt from "jsonwebtoken"
 
-const generateAccessTokenAndRefreshToken = async(userId){
+const generateAccessTokenAndRefreshToken = async(userId) => {
     try {
         const user = await user.findById(userId)
         const accessToken =  user.generateAccessToken()
@@ -93,7 +95,7 @@ const loginUser = asynchandler(async(req,res)=>{
 
     const {username,email,password} = req.body
 
-    if (!username || !email) {
+    if (!(username || email)) {
         throw new ApiError(400,"username or email is required")
     }
 
@@ -113,28 +115,103 @@ const loginUser = asynchandler(async(req,res)=>{
 
     const {accessToken,refreshToken} = await generateAccessTokenAndRefreshToken(user._id)
 
-    const loggedInUser = User.findById(user._id).select(-password,-refreshToken)
+    const loggedInUser = User.findById(user._id).select("-password,-refreshToken")
 
-    const options = {
-        httpOnly = true,
-        secure = true
+    const options = {  // option requied while sending cookies,so no one can change cookies on f-end
+        httpOnly:true,
+        secure:true
     }
 
-    return res.status(200)
-    .cookie("accessToken",accessToken,options)
+    return res.status(200)  // all wprk done
+    .cookie("accessToken",accessToken,options)  // sending cookie for accesstoken
     .cookie("refreshToken",refreshToken,options)
-    .json{
-        new ApiResponse{
-            200,
+    .json(
+        new ApiResponse(200,
             {
-                
-            }
+            user:loggedInUser,
+            accessToken,refreshToken  // All are "data" used in ApiResponse which are in curly bracket
+            },
+            "user logged in succeddfully")
+    )
+})
+
+const logOutUser = asynchandler(async(req,res)=>{
+    await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set:{
+                refreshToken:undefined
+            },
+        },
+        {
+            new :true
         }
+    )
+    const options = {  // option requied while sending cookies,so no one can change cookies on f-end
+        httpOnly:true,
+        secure:true
+    }
+    return res
+    .status(200)
+    .clearCookie("accessToken",options)
+    .clearCookie("refreshToken",options)
+    .json(
+        new ApiResponse(200,{},"User logged out")
+    )
+})
+
+const refreshAccessToken = asynchandler(async(req,res)=>{
+    const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken
+
+    if (!incomingRefreshToken) {
+        throw new ApiError(401,"unauthorized request")
     }
 
+    try {
+        const decodedToken = jwt.verify(
+            incomingRefreshToken,
+            process.env.REFRESH_TOKEN_SECRET
+        )
+    
+        const user = await User.findById(decodedToken?._id)
+    
+        if(!user){
+            throw new ApiError(401,"Invalid refresh token")
+        }
+    
+        if (incomingRefreshToken !== user?.refreshToken) {
+            throw new ApiError(401,"refreshtoken is expired or used")
+            
+        }
+    
+        const options = { 
+            httpOnly:true,
+            secure:true
+        }
+    
+        const {accessToken,newrefreshToken} = await generateAccessTokenAndRefreshToken(user._id)
+    
+        return res
+        .status(200)
+        .cookie("accesstoken",accessToken,options)
+        .cookie("refreshtoken",newrefreshToken,options)
+        .json(
+            new ApiResponse(
+                200,
+                {accessToken,refreshToken,newrefreshToken},
+                "Access token refreshed"
+            )
+        )
+    } catch (error) {
+        throw new ApiError(401,error?.message || "Invalid refreesh token")
+    }
 })
+
+
 
 export {
     registerUser,
-    loginUser
+    loginUser,
+    logOutUser,
+    refreshAccessToken
 }
